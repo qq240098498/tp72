@@ -74,6 +74,23 @@ app.patch('/api/entries/:id', (req, res) => {
   }
 });
 
+// 编辑占用：打开表单时占位（也用于心跳续期），关闭表单时释放
+app.post('/api/entries/:id/lock', (req, res) => {
+  try {
+    res.json(api.lockEntry(req.params.id, req.body));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.delete('/api/entries/:id/lock', (req, res) => {
+  try {
+    res.json(api.unlockEntry(req.params.id, req.body));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
 app.delete('/api/entries/:id', (req, res) => {
   try {
     res.json(api.deleteEntry(req.params.id));
@@ -87,12 +104,12 @@ app.use('/api', (_req, res) => {
   res.status(404).json({ error: { code: 'API_NOT_FOUND', message: '接口不存在', field: '' } });
 });
 
-// 统一错误出口：业务异常按状态码与错误码返回，其余按服务异常处理
+// 统一错误出口：业务异常按状态码与错误码返回，details 里的结构化信息原样带给页面，其余按服务异常处理
 function sendError(res, err) {
   if (err instanceof api.ApiError) {
-    return res.status(err.status).json({
-      error: { code: err.code, message: err.message, field: err.field },
-    });
+    const error = { code: err.code, message: err.message, field: err.field };
+    if (err.details) error.details = err.details;
+    return res.status(err.status).json({ error });
   }
   console.error('[tp72] 处理请求时出现未预期的问题：', err);
   return res.status(500).json({

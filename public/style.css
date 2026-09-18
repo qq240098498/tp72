@@ -376,3 +376,106 @@ label.full input {
   display: flex;
   gap: 10px;
 }
+
+/* 编辑占用横幅：自己占着是蓝色提示，别人占着是黄色警告 */
+.lock-banner {
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12.5px;
+}
+
+.lock-banner.info {
+  border: 1px solid #c9dbff;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.lock-banner.warn {
+  border: 1px solid var(--warn-line);
+  background: var(--warn-bg);
+  color: #8a5a00;
+}
+
+/* 列表里的占用与覆盖标记 */
+.tag.busy {
+  background: var(--warn-bg);
+  color: #8a5a00;
+}
+
+.tag.overridden {
+  background: #fdeeee;
+  color: var(--danger);
+}
+
+.cell-sub {
+  margin-top: 2px;
+  color: var(--ink-soft);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* 保存被拒时的冲突面板 */
+.conflict-box {
+  padding: 12px 14px;
+  border: 1px solid #f0c2c2;
+  border-radius: 6px;
+  background: #fdf6f6;
+}
+
+.conflict-box h4 {
+  margin: 0 0 6px;
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.conflict-tip {
+  margin: 0 0 8px;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.conflict-list {
+  margin: 0 0 12px;
+  padding-left: 18px;
+}
+
+.conflict-list li {
+  margin: 4px 0;
+  font-size: 12.5px;
+}
+
+.conflict-field {
+  font-weight: 600;
+}
+
+.conflict-from {
+  color: var(--ink-soft);
+  text-decoration: line-through;
+}
+
+.conflict-arrow {
+  margin: 0 6px;
+  color: var(--ink-soft);
+}
+
+.conflict-to {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+button.danger-solid {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: #fff;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* 只读表单：所有输入项置灰，明确告诉用户现在只能看 */
+.entry-form.readonly input {
+  background: #f3f4f6;
+  color: var(--ink-soft);
+}

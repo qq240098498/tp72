@@ -114,9 +114,15 @@ function seedData() {
           'en-US': 'Please complete the payment within 30 minutes',
         },
         note: '订单详情页支付倒计时提示',
-        updatedBy: '王凯',
+        updatedBy: '李文',
         createdAt: '2026-09-09T04:20:00.000Z',
-        updatedAt: '2026-09-16T02:45:00.000Z',
+        updatedAt: '2026-09-16T03:10:00.000Z',
+        lastForceOverride: {
+          by: '李文',
+          at: '2026-09-16T03:10:00.000Z',
+          overriddenBy: '王凯',
+          overriddenAt: '2026-09-16T02:45:00.000Z',
+        },
       },
       {
         id: 'entry-1008',
@@ -245,6 +251,21 @@ function normalizeLanguage(item, fallbackIndex) {
   };
 }
 
+// 强制覆盖留下的痕迹：谁、在什么时候、盖掉了谁的版本；缺关键字段的痕迹视为无效
+function normalizeForceOverride(value) {
+  const source = value && typeof value === 'object' ? value : null;
+  if (!source) return null;
+  const by = typeof source.by === 'string' && source.by.trim() ? source.by.trim() : '';
+  const at = typeof source.at === 'string' && source.at ? source.at : '';
+  if (!by || !at) return null;
+  return {
+    by,
+    at,
+    overriddenBy: typeof source.overriddenBy === 'string' && source.overriddenBy.trim() ? source.overriddenBy.trim() : '',
+    overriddenAt: typeof source.overriddenAt === 'string' ? source.overriddenAt : '',
+  };
+}
+
 // 把单条文案整理成固定结构：译文只保留字符串取值，其余一律丢弃
 function normalizeEntry(item, fallbackIndex) {
   const source = item && typeof item === 'object' ? item : {};
@@ -265,6 +286,7 @@ function normalizeEntry(item, fallbackIndex) {
     updatedBy: typeof source.updatedBy === 'string' && source.updatedBy.trim() ? source.updatedBy.trim() : UNNAMED,
     createdAt,
     updatedAt: typeof source.updatedAt === 'string' && source.updatedAt ? source.updatedAt : createdAt,
+    lastForceOverride: normalizeForceOverride(source.lastForceOverride),
   };
 }
 

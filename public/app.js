@@ -5,11 +5,15 @@ const state = {
   entries: [],
   modules: [],
   editingId: '',
+  editingLock: null, // 自己占到的锁：{ token, operator, since, expiresAt }
+  baseEntry: null, // 打开表单那一刻的快照，保存时随请求带上，服务端据此判断有没有被别人改过
+  readOnly: false, // 别人占着时打开的是只读表单
+  lockTimer: null, // 心跳定时器：占用期间每分钟续期一次
 };
 
 const el = (id) => document.getElementById(id);
 
-// 统一的请求入口：出错时把服务端给的错误码、说明与出错位置一起抛出去
+// 统一的请求入口：出错时把服务端给的错误码、说明、出错位置与结构化详情一起抛出去
 async function request(path, options) {
   const res = await fetch(path, {
     headers: { 'Content-Type': 'application/json' },
@@ -26,6 +30,7 @@ async function request(path, options) {
     const failure = new Error(error.message || `请求失败（状态码 ${res.status}）`);
     failure.code = error.code || '';
     failure.field = error.field || '';
+    failure.details = error.details || null;
     throw failure;
   }
   return payload;
@@ -176,7 +181,7 @@ function renderEntries() {
   const head = el('entry-head-row');
   head.innerHTML = ['模块', '文案键']
     .concat(state.languages.map((item) => item.code))
-    .concat(['备注', '最近改动人', '更新时间', '操作'])
+    .concat(['备注', '最近改动人', '更新时间', '编辑占用', '覆盖记录', '操作'])
     .map((text) => `<th>${escapeHtml(text)}</th>`)
     .join('');
 
@@ -188,6 +193,14 @@ function renderEntries() {
       if (!value.trim()) return '<td class="missing">待翻译</td>';
       return `<td title="${escapeHtml(value)}">${escapeHtml(value)}</td>`;
     });
+    // 占用记录：谁占着、从什么时候开始，别人一眼能看到这条正在被人编辑
+    const lockCell = item.lock
+      ? `<td><span class="tag busy">${escapeHtml(item.lock.operator)} 编辑中</span><div class="cell-sub">自 ${escapeHtml(formatTime(item.lock.since))} 起</div></td>`
+      : '<td class="missing">—</td>';
+    // 覆盖记录：这条文案被谁强制覆盖过，留在列表里事后可查
+    const overrideCell = item.lastForceOverride
+      ? `<td><span class="tag overridden">被强制覆盖过</span><div class="cell-sub">${escapeHtml(item.lastForceOverride.by)} · ${escapeHtml(formatTime(item.lastForceOverride.at))}</div></td>`
+      : '<td class="missing">—</td>';
     return `<tr>
       <td class="mono">${escapeHtml(item.module)}</td>
       <td class="mono">${escapeHtml(item.key)}</td>
@@ -195,6 +208,8 @@ function renderEntries() {
       <td class="note-cell">${escapeHtml(item.note)}</td>
       <td>${escapeHtml(item.updatedBy)}</td>
       <td class="mono">${escapeHtml(formatTime(item.updatedAt))}</td>
+      ${lockCell}
+      ${overrideCell}
       <td class="actions">
         <button type="button" class="link" data-entry-edit="${escapeHtml(item.id)}">编辑</button>
         <button type="button" class="link danger" data-entry-delete="${escapeHtml(item.id)}">删除</button>
@@ -204,22 +219,149 @@ function renderEntries() {
   el('entry-empty').classList.toggle('hidden', state.entries.length > 0);
 }
 
-function openEntryForm(entry) {
+// 点编辑时先尝试占住这条文案：占住了按可编辑打开并记下快照与占用凭证；
+// 被别人占着时照样打开，但只能看不能存，页面上说清当前是谁占着
+async function beginEdit(id) {
+  clearNotice();
+  try {
+    const res = await request(`/api/entries/${encodeURIComponent(id)}/lock`, {
+      method: 'POST',
+      body: JSON.stringify({ operator: currentOperator() }),
+    });
+    openEntryForm(res.entry, { lock: res.lock, readOnly: false });
+  } catch (err) {
+    if (err.code === 'ENTRY_LOCKED' && err.details && err.details.entry) {
+      openEntryForm(err.details.entry, { lock: err.details.lock, readOnly: true });
+      return;
+    }
+    notify(err.message, 'error');
+  }
+}
+
+function openEntryForm(entry, options) {
+  const opts = options || {};
   state.editingId = entry ? entry.id : '';
+  state.baseEntry = entry ? JSON.parse(JSON.stringify(entry)) : null;
+  state.editingLock = !opts.readOnly && opts.lock && opts.lock.token ? opts.lock : null;
+  state.readOnly = !!opts.readOnly;
   el('entry-form-title').textContent = entry ? `编辑文案：${entry.key}` : '新建文案';
   el('entry-module').value = entry ? entry.module : '';
   el('entry-key').value = entry ? entry.key : '';
   el('entry-note').value = entry ? entry.note : '';
   el('entry-translations').innerHTML = '';
   renderTranslationInputs(entry ? entry.translations : {});
+  hideConflict();
+  renderLockBanner(opts.lock || null);
+  applyReadOnly();
   el('entry-form').classList.remove('hidden');
-  el('entry-module').focus();
+  startLockHeartbeat();
+  if (!state.readOnly) el('entry-module').focus();
+}
+
+// 占用横幅：自己占着时留下占用记录（谁、从什么时候开始）；别人占着时说清只能看不能存
+function renderLockBanner(lock) {
+  const banner = el('lock-banner');
+  if (!state.editingId) {
+    banner.className = 'lock-banner hidden';
+    banner.textContent = '';
+    return;
+  }
+  if (state.readOnly) {
+    banner.className = 'lock-banner warn';
+    banner.textContent = lock
+      ? `这条文案正由 ${lock.operator} 占用（从 ${formatTime(lock.since)} 开始），你只能查看，不能保存`
+      : '这条文案正被别人占用，你只能查看，不能保存';
+    return;
+  }
+  if (state.editingLock) {
+    banner.className = 'lock-banner info';
+    banner.textContent = `占用记录：${state.editingLock.operator} 从 ${formatTime(state.editingLock.since)} 开始编辑这条文案，保存或取消后释放`;
+    return;
+  }
+  banner.className = 'lock-banner hidden';
+  banner.textContent = '';
+}
+
+function applyReadOnly() {
+  const form = el('entry-form');
+  form.classList.toggle('readonly', state.readOnly);
+  form.querySelectorAll('input').forEach((input) => {
+    input.disabled = state.readOnly;
+  });
+  el('entry-save').disabled = state.readOnly;
+}
+
+// 占用期间每分钟向服务端续期一次；续不上（锁过期被别人拿走）时当场转成只读
+function startLockHeartbeat() {
+  stopLockHeartbeat();
+  if (!state.editingId || !state.editingLock) return;
+  state.lockTimer = window.setInterval(async () => {
+    if (!state.editingId || !state.editingLock) return;
+    try {
+      const res = await request(`/api/entries/${encodeURIComponent(state.editingId)}/lock`, {
+        method: 'POST',
+        body: JSON.stringify({ operator: currentOperator(), lockToken: state.editingLock.token }),
+      });
+      state.editingLock = res.lock;
+    } catch (err) {
+      stopLockHeartbeat();
+      state.editingLock = null;
+      state.readOnly = true;
+      applyReadOnly();
+      renderLockBanner(err.details && err.details.lock ? err.details.lock : null);
+      notify(err.message || '占用已失效，当前只能查看', 'error');
+    }
+  }, 60000);
+}
+
+function stopLockHeartbeat() {
+  if (state.lockTimer) {
+    window.clearInterval(state.lockTimer);
+    state.lockTimer = null;
+  }
+}
+
+// 关闭表单时把自己占的锁放掉；服务端可能已经放过了，再发一次也无妨
+function releaseCurrentLock() {
+  const id = state.editingId;
+  const lock = state.editingLock;
+  state.editingLock = null;
+  if (!id || !lock) return;
+  request(`/api/entries/${encodeURIComponent(id)}/lock`, {
+    method: 'DELETE',
+    body: JSON.stringify({ lockToken: lock.token }),
+  }).catch(() => {});
 }
 
 function closeEntryForm() {
+  releaseCurrentLock();
+  stopLockHeartbeat();
   state.editingId = '';
+  state.baseEntry = null;
+  state.readOnly = false;
   el('entry-form').classList.add('hidden');
+  hideConflict();
   clearFieldMarks();
+}
+
+// 保存被拒时的冲突面板：逐项列出别人把它从什么改成了什么，并给出两个明确的选择
+function showConflict(details) {
+  const changes = (details && details.changes) || [];
+  const list = el('conflict-list');
+  list.innerHTML = changes.length
+    ? changes.map((change) => `<li><span class="conflict-field">${escapeHtml(change.label)}</span>：<span class="conflict-from">${escapeHtml(displayValue(change.from))}</span><span class="conflict-arrow">→</span><span class="conflict-to">${escapeHtml(displayValue(change.to))}</span></li>`).join('')
+    : '<li>对方改动了这条文案，但具体差异没能列出来</li>';
+  el('entry-conflict').classList.remove('hidden');
+  el('entry-conflict').scrollIntoView({ block: 'nearest' });
+}
+
+function hideConflict() {
+  el('entry-conflict').classList.add('hidden');
+  el('conflict-list').innerHTML = '';
+}
+
+function displayValue(value) {
+  return value === undefined || value === null || value === '' ? '（空）' : value;
 }
 
 async function submitLanguage(event) {
@@ -246,10 +388,13 @@ async function submitLanguage(event) {
   }
 }
 
+// 编辑保存时带上打开表单那一刻的快照与占用凭证：
+// 服务端据此判断占用期间有没有被别人改过，被改过就拒绝并把差异带回来
 async function submitEntry(event) {
   event.preventDefault();
   clearNotice();
   clearFieldMarks();
+  hideConflict();
   const payload = {
     module: el('entry-module').value,
     key: el('entry-key').value,
@@ -258,6 +403,11 @@ async function submitEntry(event) {
     translations: collectTranslations(),
   };
   const editing = state.editingId;
+  if (editing) {
+    payload.baseUpdatedAt = state.baseEntry ? state.baseEntry.updatedAt : '';
+    payload.baseEntry = state.baseEntry || undefined;
+    payload.lockToken = state.editingLock ? state.editingLock.token : '';
+  }
   try {
     if (editing) {
       await request(`/api/entries/${encodeURIComponent(editing)}`, { method: 'PATCH', body: JSON.stringify(payload) });
@@ -270,6 +420,55 @@ async function submitEntry(event) {
     await loadEntries();
     await loadLanguages();
   } catch (err) {
+    if (editing && err.code === 'ENTRY_CONFLICT' && err.details) {
+      notify(err.message, 'error');
+      showConflict(err.details);
+      return;
+    }
+    if (editing && err.code === 'ENTRY_LOCKED') {
+      // 占用已经落到别人手里：当场转成只读，避免误以为还能存
+      stopLockHeartbeat();
+      state.editingLock = null;
+      state.readOnly = true;
+      applyReadOnly();
+      renderLockBanner(err.details && err.details.lock ? err.details.lock : null);
+    }
+    notify(err.message, 'error');
+    markField(err.field);
+  }
+}
+
+// 冲突面板的两个选择之一：按本地填写的内容强制覆盖，服务端会在文案上留下覆盖记录
+async function forceOverwrite() {
+  clearNotice();
+  const editing = state.editingId;
+  if (!editing) return;
+  const payload = {
+    module: el('entry-module').value,
+    key: el('entry-key').value,
+    note: el('entry-note').value,
+    operator: currentOperator(),
+    translations: collectTranslations(),
+    baseUpdatedAt: state.baseEntry ? state.baseEntry.updatedAt : '',
+    baseEntry: state.baseEntry || undefined,
+    lockToken: state.editingLock ? state.editingLock.token : '',
+    force: true,
+  };
+  try {
+    await request(`/api/entries/${encodeURIComponent(editing)}`, { method: 'PATCH', body: JSON.stringify(payload) });
+    notify('已按你的内容强制覆盖，这条文案的覆盖记录会留在列表里', 'ok');
+    closeEntryForm();
+    await loadEntries();
+    await loadLanguages();
+  } catch (err) {
+    if (err.code === 'ENTRY_LOCKED') {
+      stopLockHeartbeat();
+      state.editingLock = null;
+      state.readOnly = true;
+      applyReadOnly();
+      renderLockBanner(err.details && err.details.lock ? err.details.lock : null);
+      hideConflict();
+    }
     notify(err.message, 'error');
     markField(err.field);
   }
@@ -312,9 +511,7 @@ document.addEventListener('click', async (event) => {
   }
 
   if (node.dataset.entryEdit) {
-    clearNotice();
-    const found = state.entries.find((item) => item.id === node.dataset.entryEdit);
-    if (found) openEntryForm(found);
+    beginEdit(node.dataset.entryEdit);
     return;
   }
 
@@ -341,6 +538,13 @@ el('entry-new').addEventListener('click', () => {
   openEntryForm(null);
 });
 el('entry-cancel').addEventListener('click', closeEntryForm);
+// 冲突面板的另一个选择：放弃本地这次的改动，服务端上的内容保持不动
+el('conflict-abandon').addEventListener('click', () => {
+  closeEntryForm();
+  notify('已放弃本次修改，这条文案保持别人改后的内容', 'ok');
+  loadEntries().catch((err) => notify(err.message, 'error'));
+});
+el('conflict-force').addEventListener('click', forceOverwrite);
 el('filter-apply').addEventListener('click', () => {
   clearNotice();
   loadEntries().catch((err) => notify(err.message, 'error'));
@@ -361,6 +565,17 @@ el('filter-module').addEventListener('change', () => {
 });
 el('operator').addEventListener('change', () => {
   window.localStorage.setItem(OPERATOR_KEY, currentOperator());
+});
+
+// 页面关闭或刷新时尽力把占用放掉，免得别人干等占用过期
+window.addEventListener('beforeunload', () => {
+  if (!state.editingId || !state.editingLock) return;
+  fetch(`/api/entries/${encodeURIComponent(state.editingId)}/lock`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ lockToken: state.editingLock.token }),
+    keepalive: true,
+  });
 });
 
 // 页面打开时先把语言与文案拉一遍，语言决定文案表格里有哪些列

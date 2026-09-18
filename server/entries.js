@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const { load, save, MAX_TRANSLATION_LENGTH, MAX_NOTE_LENGTH, MAX_OPERATOR_LENGTH, UNNAMED } = require('./store');
 const { ApiError, pickText } = require('./errors');
+const locks = require('./locks');
 
 const MODULE_PATTERN = /^[a-z][a-z0-9-]{0,29}$/;
 const KEY_PATTERN = /^[a-z][a-z0-9_-]*(\.[a-z0-9_-]+)+$/;
@@ -98,7 +99,8 @@ function sortEntries(list) {
   });
 }
 
-// 按模块与关键词筛选：关键词同时匹配文案键与任意一种语言的译文
+// 按模块与关键词筛选：关键词同时匹配文案键与任意一种语言的译文；
+// 每条文案带上当前有效的占用记录，列表据此标出"谁在编辑"
 function listEntries(options) {
   const input = options && typeof options === 'object' ? options : {};
   const module = pickText(input.module);
@@ -120,14 +122,15 @@ function listEntries(options) {
   });
   const modules = Object.keys(counts).sort().map((name) => ({ module: name, count: counts[name] }));
 
-  return { entries: sortEntries(list), modules };
+  const entries = sortEntries(list).map((item) => ({ ...item, lock: locks.expose(locks.getActive(item.id)) }));
+  return { entries, modules };
 }
 
 function getEntry(id) {
   const data = load();
   const found = data.entries.find((item) => item.id === id);
   if (!found) throw new ApiError(404, 'ENTRY_NOT_FOUND', '这条文案不存在或已被删除', '');
-  return found;
+  return { ...found, lock: locks.expose(locks.getActive(id)) };
 }
 
 function createEntry(payload) {
@@ -156,6 +159,56 @@ function createEntry(payload) {
   return created;
 }
 
+// 逐项对比两个版本：打开表单时的快照 vs 现在落盘的内容，
+// 每一处不一致都列出"从什么变成了什么"，保存冲突时展示给页面
+function diffEntries(base, current) {
+  const changes = [];
+  if (!base || typeof base !== 'object') return changes;
+  const text = (value) => (typeof value === 'string' ? value : '');
+  const push = (field, label, from, to) => {
+    if (from !== to) changes.push({ field, label, from, to });
+  };
+  push('module', '模块', text(base.module), current.module);
+  push('key', '文案键', text(base.key), current.key);
+  push('note', '备注', text(base.note), current.note);
+  const baseTranslations = base.translations && typeof base.translations === 'object' && !Array.isArray(base.translations)
+    ? base.translations
+    : {};
+  const codes = Array.from(new Set(Object.keys(baseTranslations).concat(Object.keys(current.translations)))).sort();
+  codes.forEach((code) => {
+    push(`translations.${code}`, `${code} 译文`, text(baseTranslations[code]), text(current.translations[code]));
+  });
+  return changes;
+}
+
+// 打开编辑表单时先占住这条文案：占住了返回最新内容与占用凭证（token 只给占用者本人）；
+// 被别人占着时返回 409，把占用记录与文案内容一起带给页面，页面按只读打开
+function lockEntry(id, payload) {
+  const input = payload && typeof payload === 'object' ? payload : {};
+  const data = load();
+  const found = data.entries.find((item) => item.id === id);
+  if (!found) throw new ApiError(404, 'ENTRY_NOT_FOUND', '这条文案不存在或已被删除', '');
+  const operator = validateOperator(input.operator, UNNAMED);
+  const result = locks.acquire(id, operator, pickText(input.lockToken));
+  if (!result.ok) {
+    throw new ApiError(409, 'ENTRY_LOCKED', `这条文案正由 ${result.lock.operator} 占用（从 ${result.lock.since} 开始），你只能查看，不能保存`, '', {
+      lock: locks.expose(result.lock),
+      entry: found,
+    });
+  }
+  return {
+    lock: { ...locks.expose(result.lock), token: result.lock.token },
+    entry: found,
+  };
+}
+
+// 关闭表单时释放占用；token 对不上时静默忽略，返回里如实告知有没有释放掉
+function unlockEntry(id, payload) {
+  const input = payload && typeof payload === 'object' ? payload : {};
+  const released = locks.release(id, pickText(input.lockToken));
+  return { id, released };
+}
+
 function updateEntry(id, payload) {
   const input = payload && typeof payload === 'object' ? payload : {};
   const data = load();
@@ -171,13 +224,42 @@ function updateEntry(id, payload) {
   const operator = validateOperator(input.operator, found.updatedBy);
   assertKeyFree(data, module, key, found.id);
 
+  // 第一道门槛：条目被别人占着时直接拒绝，页面只能看不能存
+  const lockToken = pickText(input.lockToken);
+  locks.assertCanSave(id, lockToken);
+
+  // 第二道门槛：打开表单之后这条文案被别人动过，拒绝并把每处差异带回去；
+  // 页面确认后可以选择放弃，或者带上 force 按本地内容强制覆盖
+  const force = input.force === true;
+  const baseUpdatedAt = pickText(input.baseUpdatedAt);
+  if (!force && baseUpdatedAt && found.updatedAt !== baseUpdatedAt) {
+    throw new ApiError(409, 'ENTRY_CONFLICT', '这条文案在你编辑期间被别人改过了，本次保存被拒绝。请对比下面的差异，选择放弃本次修改或按你的内容强制覆盖', '', {
+      changes: diffEntries(input.baseEntry, found),
+      current: found,
+    });
+  }
+
+  const previousUpdatedBy = found.updatedBy;
+  const previousUpdatedAt = found.updatedAt;
+
   found.module = module;
   found.key = key;
   found.translations = translations;
   found.note = note;
   found.updatedBy = operator;
   found.updatedAt = new Date().toISOString();
+  // 强制覆盖要在文案上留下痕迹：谁、在什么时候、盖掉了谁的版本，事后在列表里能查到
+  if (force) {
+    found.lastForceOverride = {
+      by: operator,
+      at: found.updatedAt,
+      overriddenBy: previousUpdatedBy,
+      overriddenAt: previousUpdatedAt,
+    };
+  }
   save(data);
+  // 保存成功后这次编辑就结束了，顺带把自己占的锁放掉
+  locks.release(id, lockToken);
   return found;
 }
 
@@ -187,6 +269,7 @@ function deleteEntry(id) {
   if (index === -1) throw new ApiError(404, 'ENTRY_NOT_FOUND', '这条文案不存在或已被删除', '');
   const [removed] = data.entries.splice(index, 1);
   save(data);
+  locks.drop(id);
   return { id: removed.id, key: removed.key };
 }
 
@@ -196,6 +279,9 @@ module.exports = {
   createEntry,
   updateEntry,
   deleteEntry,
+  lockEntry,
+  unlockEntry,
+  diffEntries,
   validateModule,
   validateKey,
   validateTranslations,

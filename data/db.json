@@ -55,7 +55,8 @@
       "note": "首页顶部轮播副标题",
       "updatedBy": "李文",
       "createdAt": "2026-09-08T02:12:00.000Z",
-      "updatedAt": "2026-09-16T09:32:00.000Z"
+      "updatedAt": "2026-09-16T09:32:00.000Z",
+      "lastForceOverride": null
     },
     {
       "id": "entry-1003",
@@ -70,7 +71,8 @@
       "note": "首页搜索框占位提示",
       "updatedBy": "王凯",
       "createdAt": "2026-09-08T02:20:00.000Z",
-      "updatedAt": "2026-09-15T11:05:00.000Z"
+      "updatedAt": "2026-09-15T11:05:00.000Z",
+      "lastForceOverride": null
     },
     {
       "id": "entry-1004",
@@ -83,7 +85,8 @@
       "note": "搜索无结果时的提示",
       "updatedBy": "陈晓",
       "createdAt": "2026-09-09T03:40:00.000Z",
-      "updatedAt": "2026-09-15T11:20:00.000Z"
+      "updatedAt": "2026-09-15T11:20:00.000Z",
+      "lastForceOverride": null
     },
     {
       "id": "entry-1005",
@@ -97,7 +100,8 @@
       "note": "下单确认页标题",
       "updatedBy": "李文",
       "createdAt": "2026-09-09T04:00:00.000Z",
-      "updatedAt": "2026-09-14T06:15:00.000Z"
+      "updatedAt": "2026-09-14T06:15:00.000Z",
+      "lastForceOverride": null
     },
     {
       "id": "entry-1006",
@@ -111,7 +115,8 @@
       "note": "下单确认页商品件数",
       "updatedBy": "李文",
       "createdAt": "2026-09-09T04:05:00.000Z",
-      "updatedAt": "2026-09-14T06:18:00.000Z"
+      "updatedAt": "2026-09-14T06:18:00.000Z",
+      "lastForceOverride": null
     },
     {
       "id": "entry-1007",
@@ -123,9 +128,15 @@
         "en-US": "Please complete the payment within 30 minutes"
       },
       "note": "订单详情页支付倒计时提示",
-      "updatedBy": "王凯",
+      "updatedBy": "李文",
       "createdAt": "2026-09-09T04:20:00.000Z",
-      "updatedAt": "2026-09-16T02:45:00.000Z"
+      "updatedAt": "2026-09-16T03:10:00.000Z",
+      "lastForceOverride": {
+        "by": "李文",
+        "at": "2026-09-16T03:10:00.000Z",
+        "overriddenBy": "王凯",
+        "overriddenAt": "2026-09-16T02:45:00.000Z"
+      }
     },
     {
       "id": "entry-1008",
@@ -139,7 +150,8 @@
       "note": "订单状态标签",
       "updatedBy": "陈晓",
       "createdAt": "2026-09-10T01:30:00.000Z",
-      "updatedAt": "2026-09-16T02:50:00.000Z"
+      "updatedAt": "2026-09-16T02:50:00.000Z",
+      "lastForceOverride": null
     },
     {
       "id": "entry-1009",
@@ -153,7 +165,8 @@
       "note": "登录页标题",
       "updatedBy": "李文",
       "createdAt": "2026-09-10T05:00:00.000Z",
-      "updatedAt": "2026-09-13T08:00:00.000Z"
+      "updatedAt": "2026-09-13T08:00:00.000Z",
+      "lastForceOverride": null
     },
     {
       "id": "entry-1010",
@@ -166,7 +179,8 @@
       "note": "登录页账号输入框占位提示",
       "updatedBy": "王凯",
       "createdAt": "2026-09-10T05:02:00.000Z",
-      "updatedAt": "2026-09-13T08:05:00.000Z"
+      "updatedAt": "2026-09-13T08:05:00.000Z",
+      "lastForceOverride": null
     },
     {
       "id": "entry-1011",
@@ -179,7 +193,8 @@
       "note": "注册页协议勾选文案，{link} 由前端替换成协议链接",
       "updatedBy": "陈晓",
       "createdAt": "2026-09-11T05:30:00.000Z",
-      "updatedAt": "2026-09-13T08:20:00.000Z"
+      "updatedAt": "2026-09-13T08:20:00.000Z",
+      "lastForceOverride": null
     },
     {
       "id": "entry-1012",
@@ -193,7 +208,8 @@
       "note": "通用确认按钮",
       "updatedBy": "王凯",
       "createdAt": "2026-09-11T06:00:00.000Z",
-      "updatedAt": "2026-09-12T03:10:00.000Z"
+      "updatedAt": "2026-09-12T03:10:00.000Z",
+      "lastForceOverride": null
     },
     {
       "id": "entry-1013",
@@ -207,7 +223,8 @@
       "note": "通用取消按钮",
       "updatedBy": "王凯",
       "createdAt": "2026-09-11T06:02:00.000Z",
-      "updatedAt": "2026-09-12T03:12:00.000Z"
+      "updatedAt": "2026-09-12T03:12:00.000Z",
+      "lastForceOverride": null
     },
     {
       "id": "entry-1014",
@@ -221,7 +238,8 @@
       "note": "通用网络异常提示",
       "updatedBy": "李文",
       "createdAt": "2026-09-11T06:10:00.000Z",
-      "updatedAt": "2026-09-12T03:20:00.000Z"
+      "updatedAt": "2026-09-12T03:20:00.000Z",
+      "lastForceOverride": null
     },
     {
       "id": "entry-1015",
@@ -235,7 +253,8 @@
       "note": "通用加载中提示",
       "updatedBy": "陈晓",
       "createdAt": "2026-09-11T06:15:00.000Z",
-      "updatedAt": "2026-09-12T03:25:00.000Z"
+      "updatedAt": "2026-09-12T03:25:00.000Z",
+      "lastForceOverride": null
     }
   ]
 }

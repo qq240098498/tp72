@@ -79,6 +79,16 @@
 
       <form class="entry-form hidden" id="entry-form" autocomplete="off">
         <h3 id="entry-form-title">新建文案</h3>
+        <div class="lock-banner hidden" id="lock-banner"></div>
+        <div class="conflict-box hidden" id="entry-conflict">
+          <h4>保存被拒绝：这条文案在你编辑期间被别人改过</h4>
+          <p class="conflict-tip">下面逐项列出占用期间别人改动的地方（从 → 到）。确认后可以选择放弃本次修改，或者按你当前填写的内容强制覆盖，强制覆盖会在文案上留下记录。</p>
+          <ul class="conflict-list" id="conflict-list"></ul>
+          <div class="form-actions">
+            <button type="button" id="conflict-abandon" class="ghost">放弃本次修改</button>
+            <button type="button" id="conflict-force" class="danger-solid">按我的内容强制覆盖</button>
+          </div>
+        </div>
         <div class="form-row">
           <label data-field="module">模块<input id="entry-module" placeholder="例如 home" maxlength="30"></label>
           <label data-field="key">文案键<input id="entry-key" placeholder="例如 home.banner.title" maxlength="120"></label>
@@ -86,7 +96,7 @@
         <div class="form-row translations" id="entry-translations"></div>
         <label class="full" data-field="note">备注<input id="entry-note" placeholder="这条文案出现的页面位置" maxlength="200"></label>
         <div class="form-actions">
-          <button type="submit">保存</button>
+          <button type="submit" id="entry-save">保存</button>
           <button type="button" id="entry-cancel" class="ghost">取消</button>
         </div>
       </form>

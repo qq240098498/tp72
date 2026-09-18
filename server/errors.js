@@ -1,11 +1,13 @@
-// 带错误码与出错位置的业务异常，页面据此把问题标到具体输入项上
+// 带错误码与出错位置的业务异常，页面据此把问题标到具体输入项上；
+// details 用来带结构化的补充信息，比如保存冲突时的逐项差异
 class ApiError extends Error {
-  constructor(status, code, message, field) {
+  constructor(status, code, message, field, details) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
     this.field = field || '';
+    if (details !== undefined) this.details = details;
   }
 }
 

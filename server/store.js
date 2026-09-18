@@ -256,7 +256,15 @@ function normalizeEntry(item, fallbackIndex) {
       if (typeof value === 'string') translations[code] = value;
     });
   }
-  return {
+  // 强制覆盖的留痕：只保留 by/at 都齐全的记录，没有覆盖过的文案不带这个字段
+  const forceOverrides = Array.isArray(source.forceOverrides)
+    ? source.forceOverrides
+        .filter((record) => record && typeof record === 'object'
+          && typeof record.by === 'string' && record.by.trim()
+          && typeof record.at === 'string' && record.at)
+        .map((record) => ({ by: record.by.trim(), at: record.at }))
+    : [];
+  const entry = {
     id: typeof source.id === 'string' && source.id ? source.id : `entry-restored-${fallbackIndex + 1}`,
     module: typeof source.module === 'string' && source.module.trim() ? source.module.trim() : 'default',
     key: typeof source.key === 'string' && source.key.trim() ? source.key.trim() : `entry.restored.${fallbackIndex + 1}`,
@@ -266,6 +274,8 @@ function normalizeEntry(item, fallbackIndex) {
     createdAt,
     updatedAt: typeof source.updatedAt === 'string' && source.updatedAt ? source.updatedAt : createdAt,
   };
+  if (forceOverrides.length) entry.forceOverrides = forceOverrides;
+  return entry;
 }
 
 // 整份数据保证 languages 与 entries 结构一致；默认语言有且只有一个

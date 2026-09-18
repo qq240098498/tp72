@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const { load, save, MAX_TRANSLATION_LENGTH, MAX_NOTE_LENGTH, MAX_OPERATOR_LENGTH, UNNAMED } = require('./store');
 const { ApiError, pickText } = require('./errors');
+const { getLock, acquireLock, releaseLock } = require('./locks');
 
 const MODULE_PATTERN = /^[a-z][a-z0-9-]{0,29}$/;
 const KEY_PATTERN = /^[a-z][a-z0-9_-]*(\.[a-z0-9_-]+)+$/;
@@ -120,14 +121,60 @@ function listEntries(options) {
   });
   const modules = Object.keys(counts).sort().map((name) => ({ module: name, count: counts[name] }));
 
-  return { entries: sortEntries(list), modules };
+  // 每条文案带上当前占用信息，列表里直接标出谁在编辑
+  const entries = sortEntries(list).map((item) => ({ ...item, lock: getLock(item.id) }));
+  return { entries, modules };
 }
 
 function getEntry(id) {
   const data = load();
   const found = data.entries.find((item) => item.id === id);
   if (!found) throw new ApiError(404, 'ENTRY_NOT_FOUND', '这条文案不存在或已被删除', '');
-  return found;
+  return { ...found, lock: getLock(found.id) };
+}
+
+// 打开编辑表单时的入口：登记占用并返回文案当前内容。
+// 已被别人占用时不抢锁，acquired 为 false，页面据此进入只读模式
+function openEntry(id, payload) {
+  const input = payload && typeof payload === 'object' ? payload : {};
+  const data = load();
+  const found = data.entries.find((item) => item.id === id);
+  if (!found) throw new ApiError(404, 'ENTRY_NOT_FOUND', '这条文案不存在或已被删除', '');
+  const operator = validateOperator(input.operator, UNNAMED);
+  // 持有人标识由页面生成并记在浏览器里，同名操作者也能区分开
+  const owner = pickText(input.clientId) || operator;
+  const result = acquireLock(found.id, owner, operator);
+  return { acquired: result.acquired, lock: result.lock, entry: { ...found, lock: result.lock } };
+}
+
+// 关闭表单时释放占用，持有人标识对不上时不替别人释放
+function releaseEntryLock(id, payload) {
+  const input = payload && typeof payload === 'object' ? payload : {};
+  const released = releaseLock(id, pickText(input.clientId));
+  return { released };
+}
+
+// 逐项对比打开表单时的快照与当前内容，列出每一处从什么变成了什么；
+// 译文按两种内容里出现过的语言逐项对比，缺失的一端用 null 表示未登记
+function diffEntries(base, current) {
+  const source = base && typeof base === 'object' ? base : {};
+  const diff = [];
+  const push = (field, label, from, to) => {
+    const a = from === undefined || from === null ? null : from;
+    const b = to === undefined || to === null ? null : to;
+    if (a !== b) diff.push({ field, label, from: a, to: b });
+  };
+  push('module', '模块', pickText(source.module), current.module);
+  push('key', '文案键', pickText(source.key), current.key);
+  push('note', '备注', typeof source.note === 'string' ? source.note : null, current.note);
+  const baseTranslations = source.translations && typeof source.translations === 'object' ? source.translations : {};
+  const codes = new Set(Object.keys(baseTranslations).concat(Object.keys(current.translations)));
+  Array.from(codes).sort().forEach((code) => {
+    push(`translations.${code}`, `译文 ${code}`,
+      typeof baseTranslations[code] === 'string' ? baseTranslations[code] : null,
+      typeof current.translations[code] === 'string' ? current.translations[code] : null);
+  });
+  return diff;
 }
 
 function createEntry(payload) {
@@ -162,6 +209,17 @@ function updateEntry(id, payload) {
   const found = data.entries.find((item) => item.id === id);
   if (!found) throw new ApiError(404, 'ENTRY_NOT_FOUND', '这条文案不存在或已被删除', '');
 
+  // 冲突检测：页面打开表单时记下当时的文案快照，保存时随请求带回来；
+  // 快照上的更新时间与当前不一致，说明占用期间这条文案被别人改过，
+  // 当场拒绝并把逐项差异与当前内容一起返回，由页面给出放弃或强制覆盖的选择
+  const base = input.base && typeof input.base === 'object' ? input.base : null;
+  if (base && typeof base.updatedAt === 'string' && base.updatedAt && base.updatedAt !== found.updatedAt) {
+    throw new ApiError(409, 'ENTRY_CONFLICT', '这条文案在你编辑期间被别人改过，保存被拒绝，请确认差异后选择放弃本地改动或强制覆盖', '', {
+      diff: diffEntries(base, found),
+      current: found,
+    });
+  }
+
   const module = input.module === undefined ? found.module : validateModule(input.module);
   const key = input.key === undefined ? found.key : validateKey(input.key);
   const translations = input.translations === undefined
@@ -177,6 +235,11 @@ function updateEntry(id, payload) {
   found.note = note;
   found.updatedBy = operator;
   found.updatedAt = new Date().toISOString();
+  // 强制覆盖在文案上留痕：谁、在什么时间压掉了别人的改动，事后可查
+  if (input.force === true) {
+    const record = { by: operator, at: found.updatedAt };
+    found.forceOverrides = Array.isArray(found.forceOverrides) ? found.forceOverrides.concat(record) : [record];
+  }
   save(data);
   return found;
 }
@@ -186,6 +249,7 @@ function deleteEntry(id) {
   const index = data.entries.findIndex((item) => item.id === id);
   if (index === -1) throw new ApiError(404, 'ENTRY_NOT_FOUND', '这条文案不存在或已被删除', '');
   const [removed] = data.entries.splice(index, 1);
+  releaseLock(id);
   save(data);
   return { id: removed.id, key: removed.key };
 }
@@ -193,9 +257,12 @@ function deleteEntry(id) {
 module.exports = {
   listEntries,
   getEntry,
+  openEntry,
+  releaseEntryLock,
   createEntry,
   updateEntry,
   deleteEntry,
+  diffEntries,
   validateModule,
   validateKey,
   validateTranslations,

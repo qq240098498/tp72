@@ -66,6 +66,24 @@ app.get('/api/entries/:id', (req, res) => {
   }
 });
 
+// 打开编辑表单时登记占用：已被别人占用时 acquired 为 false，并带回当前占用信息
+app.post('/api/entries/:id/lock', (req, res) => {
+  try {
+    res.json(api.openEntry(req.params.id, req.body));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+// 关闭表单或离开页面时释放占用
+app.delete('/api/entries/:id/lock', (req, res) => {
+  try {
+    res.json(api.releaseEntryLock(req.params.id, req.body));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
 app.patch('/api/entries/:id', (req, res) => {
   try {
     res.json(api.updateEntry(req.params.id, req.body));
@@ -90,9 +108,9 @@ app.use('/api', (_req, res) => {
 // 统一错误出口：业务异常按状态码与错误码返回，其余按服务异常处理
 function sendError(res, err) {
   if (err instanceof api.ApiError) {
-    return res.status(err.status).json({
-      error: { code: err.code, message: err.message, field: err.field },
-    });
+    const error = { code: err.code, message: err.message, field: err.field };
+    if (err.details !== undefined) error.details = err.details;
+    return res.status(err.status).json({ error });
   }
   console.error('[tp72] 处理请求时出现未预期的问题：', err);
   return res.status(500).json({
